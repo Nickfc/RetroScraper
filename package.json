@@ -1,0 +1,22 @@
+{
+  "name": "RetroScraber",
+  "version": "1.0.0",
+  "description": "A retro game metadata scraper",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "dependencies": {
+    "ajv": "^6.12.6",
+    "axios": "^0.21.1",
+    "chalk": "^4.0.0",
+    "cli-progress": "^3.9.1",
+    "ini": "^2.0.0",
+    "inquirer": "^9.2.7",
+    "json2csv": "^5.0.6",
+    "string-similarity": "^4.0.4",
+    "xml2js": "^0.4.23"
+  },
+  "author": "",
+  "license": "ISC"
+}
