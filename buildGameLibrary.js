@@ -13,9 +13,10 @@ const {
   LAZY_DOWNLOAD,
   OFFLINE_MODE,
   ROMS_PATHS,
+  MAX_BATCH_SIZE,
 } = require('./constants');
 const { collectGameEntries } = require('./fileScanner');
-const { fetchGameMetadata } = require('./metadataFetcher');
+const { fetchGameMetadata, fetchGameMetadataBatch } = require('./metadataFetcher');
 const { createProgressBar, updateProgressBar, stopProgressBar } = require('./ui');
 const {
   getCoverImageAbsolutePath,
@@ -107,6 +108,140 @@ async function processGame(game, console, progressBar, processedCount) {
   }
 }
 
+// Process games in batches
+async function processBatch(games, finalMap, unmatchedGames, progressBar, processedCount) {
+  const batch = games.filter(game => {
+    const key = game.consoleName.toLowerCase().trim() + ':' + game.title.toLowerCase().trim();
+    return !finalMap[key];
+  });
+
+  if (batch.length === 0) return { processed: 0, matched: 0 };
+
+  const metadataResults = await fetchGameMetadataBatch(batch);
+  let batchMatchCount = 0;
+
+  await Promise.all(batch.map(async (gameEntry, i) => {
+    const metadata = metadataResults[i];
+    if (metadata) batchMatchCount++;
+    
+    const key = gameEntry.consoleName.toLowerCase().trim() + ':' + gameEntry.title.toLowerCase().trim();
+
+    if (!metadata) {
+      unmatchedGames.push({
+        title: gameEntry.title,
+        console: gameEntry.consoleName,
+        romPath: gameEntry.romPath
+      });
+      updateProgressBar(progressBar, processedCount + i, gameEntry.title, 'warning');
+      return;
+    }
+
+    // Process the metadata
+    const platformId = getPlatformId(gameEntry.consoleName) || 0;
+    let releaseDateStr = '';
+    let releaseYear = '';
+    if (metadata.first_release_date) {
+      const dt = new Date(metadata.first_release_date * 1000);
+      releaseDateStr = dt.toISOString().split('T')[0];
+      releaseYear = dt.getFullYear().toString();
+    }
+
+    const storyline = metadata.storyline || '';
+    const category = metadata.category !== undefined ? String(metadata.category) : '';
+    const status = metadata.status !== undefined ? String(metadata.status) : '';
+    const nestedGenres = processNestedGenres(metadata.genres);
+    const tagList = generateTags({
+      summary: metadata.summary,
+      storyline,
+      genres: metadata.genres || [],
+      developer: metadata.involved_companies ? getCompanies(metadata.involved_companies, 'developer') : '',
+    });
+
+    // Create the game entry
+    const gameData = {
+      Title: gameEntry.title,
+      Console: gameEntry.consoleName,
+      PlatformID: platformId,
+      IGDB_ID: metadata.id || 0,
+      Genre: metadata.genres ? metadata.genres.map(g => g.name).join(', ') : 'Unknown',
+      RomPaths: [gameEntry.romPath],
+      Description: metadata.summary || '',
+      Players: metadata.game_modes ? getPlayerCount(metadata.game_modes) : 1,
+      Rating: metadata.rating ? (metadata.rating / 10).toFixed(1) : '',
+      ReleaseDate: releaseDateStr,
+      ReleaseYear: releaseYear,
+      Developer: metadata.involved_companies ? getCompanies(metadata.involved_companies, 'developer') : '',
+      Publisher: metadata.involved_companies ? getCompanies(metadata.involved_companies, 'publisher') : '',
+      Keywords: metadata.keywords ? metadata.keywords.map(k => k.name).join(', ') : '',
+      AgeRatings: metadata.age_ratings ? getAgeRatings(metadata.age_ratings) : '',
+      Collection: metadata.collection?.name || '',
+      Franchise: metadata.franchise?.name || '',
+      Screenshots: [],
+      Region: '',
+      Language: '',
+      FileSize: fs.statSync(gameEntry.romPath).size,
+      PlayCount: 0,
+      PlayTime: 0,
+      LastPlayed: '',
+      ControllerType: 'Gamepad',
+      SupportWebsite: '',
+      CoverImage: '',
+      BackgroundImage: '',
+      HeaderImage: '',
+      SaveFileLocation: '',
+      CheatsAvailable: false,
+      Achievements: '',
+      YouTubeTrailer: '',
+      SoundtrackLink: '',
+      LaunchArguments: '',
+      VRSupport: false,
+      Notes: '',
+      ControlScheme: '',
+      DiskCount: 1,
+      AdditionalNotes: '',
+      MetadataFetched: true,
+      Storyline: storyline,
+      Category: category,
+      Status: status,
+      NestedGenres: nestedGenres,
+      TagList: tagList,
+    };
+
+    // Download images if available
+    if (!LAZY_DOWNLOAD) {
+      if (metadata.cover?.image_id) {
+        const coverUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${metadata.cover.image_id}.jpg`;
+        const coverAbs = getCoverImageAbsolutePath(gameEntry.consoleName, gameEntry.title);
+        const success = await downloadImage(coverUrl, coverAbs);
+        if (success) {
+          gameData.CoverImage = getCoverImageShortPath(gameEntry.consoleName, gameEntry.title);
+        }
+      }
+
+      if (metadata.screenshots?.length) {
+        const maxScreens = metadata.screenshots.slice(0, 3);
+        for (let j = 0; j < maxScreens.length; j++) {
+          const imageId = maxScreens[j].image_id;
+          const screenshotUrl = `https://images.igdb.com/igdb/image/upload/t_screenshot_big/${imageId}.jpg`;
+          const screenshotAbs = getScreenshotAbsolutePath(gameEntry.consoleName, gameEntry.title, j + 1);
+          const success = await downloadImage(screenshotUrl, screenshotAbs);
+          if (success) {
+            gameData.Screenshots.push(getScreenshotShortPath(gameEntry.consoleName, gameEntry.title, j + 1));
+          }
+        }
+      }
+    }
+
+    finalMap[key] = gameData;
+    updateProgressBar(progressBar, processedCount + i, gameEntry.title, 'success');
+  }));
+
+  return {
+    processed: batch.length,
+    matched: batchMatchCount
+  };
+}
+
 // The main event - Where we turn your ROM collection into a properly cataloged obsession
 async function buildGameLibrary() {
   // Load existing hoard
@@ -127,194 +262,43 @@ async function buildGameLibrary() {
 
   // Where we store our rejection pile
   const unmatchedGames = [];
+  let matchedCount = 0;
 
   let processedCount = 0;
   let processedSinceLastSave = 0;
 
-  // The main processing loop - Where hopes and dreams go to die
-  for (let i = 0; i < newGameEntries.length; i++) {
-    const gameEntry = newGameEntries[i];
-    const { title: baseName, consoleName, romPath } = gameEntry;
-    const key = consoleName.toLowerCase().trim() + ':' + baseName.toLowerCase().trim();
+  // Process in batches of MAX_BATCH_SIZE
+  const batches = [];
+  for (let i = 0; i < newGameEntries.length; i += MAX_BATCH_SIZE) {
+    batches.push(newGameEntries.slice(i, i + MAX_BATCH_SIZE));
+  }
 
-    updateProgressBar(progressBar, processedCount, baseName, '');
+  for (const batch of batches) {
+    const batchResults = await processBatch(batch, finalMap, unmatchedGames, progressBar, processedCount);
+    processedCount += batchResults.processed;
+    matchedCount += batchResults.matched;
 
-    let romFileSize = 0;
-    try {
-      romFileSize = fs.statSync(romPath).size;
-    } catch (err) {
-      logError(`Failed to get file size for ROM "${romPath}": ${err.message}`);
-    }
-
-    let existing = finalMap[key];
-
-    if (!existing) {
-      let metadata = null;
-      try {
-        metadata = await fetchGameMetadata(gameEntry);
-      } catch (error) {
-        logError(`Failed to fetch metadata for "${baseName}": ${error.message}`);
-        metadata = null;
-      }
-      
-      let didFetchMetadata = !!metadata;
-
-      // Update progress before processing metadata
-      if (metadata) {
-        updateProgressBar(progressBar, processedCount, baseName, 'success');
-      } else if (!OFFLINE_MODE) {
-        updateProgressBar(progressBar, processedCount, baseName, 'warning');
-        unmatchedGames.push({ title: baseName, console: consoleName, romPath });
-      } else {
-        updateProgressBar(progressBar, processedCount, baseName, 'offline');
-      }
-
-      // Process and save metadata
-      const platformId = getPlatformId(consoleName) || 0;
-      let releaseDateStr = '';
-      let releaseYear = '';
-      if (metadata?.first_release_date) {
-        const dt = new Date(metadata.first_release_date * 1000);
-        releaseDateStr = dt.toISOString().split('T')[0];
-        releaseYear = dt.getFullYear().toString();
-      }
-
-      const storyline = metadata?.storyline || '';
-      const category = metadata?.category !== undefined ? String(metadata.category) : '';
-      const status = metadata?.status !== undefined ? String(metadata.status) : '';
-
-      const nestedGenres = processNestedGenres(metadata?.genres);
-
-      let tagList = [];
-      if (metadata) {
-        tagList = generateTags({
-          summary: metadata.summary,
-          storyline,
-          genres: metadata.genres || [],
-          developer: metadata?.involved_companies
-            ? getCompanies(metadata.involved_companies, 'developer')
-            : '',
-        });
-      }
-
-      existing = {
-        Title: baseName,
-        Console: consoleName,
-        PlatformID: platformId,
-        IGDB_ID: metadata?.id || 0,
-        Genre: metadata?.genres
-          ? metadata.genres.map((g) => g.name).join(', ')
-          : 'Unknown',
-        RomPaths: [romPath],
-        Description: metadata?.summary || '',
-        Players: metadata?.game_modes ? getPlayerCount(metadata.game_modes) : 1,
-        Rating: metadata?.rating ? (metadata.rating / 10).toFixed(1) : '',
-        ReleaseDate: releaseDateStr,
-        ReleaseYear: releaseYear,
-        Developer: metadata?.involved_companies
-          ? getCompanies(metadata.involved_companies, 'developer')
-          : '',
-        Publisher: metadata?.involved_companies
-          ? getCompanies(metadata.involved_companies, 'publisher')
-          : '',
-        Keywords: metadata?.keywords
-          ? metadata.keywords.map((k) => k.name).join(', ')
-          : '',
-        AgeRatings: metadata?.age_ratings
-          ? getAgeRatings(metadata.age_ratings)
-          : '',
-        Collection: metadata?.collection?.name || '',
-        Franchise: metadata?.franchise?.name || '',
-        Screenshots: [],
-        Region: '',
-        Language: '',
-        FileSize: romFileSize,
-        PlayCount: 0,
-        PlayTime: 0,
-        LastPlayed: '',
-        ControllerType: 'Gamepad',
-        SupportWebsite: '',
-        CoverImage: '',
-        BackgroundImage: '',
-        HeaderImage: '',
-        SaveFileLocation: '',
-        CheatsAvailable: false,
-        Achievements: '',
-        YouTubeTrailer: '',
-        SoundtrackLink: '',
-        LaunchArguments: '',
-        VRSupport: false,
-        Notes: '',
-        ControlScheme: '',
-        DiskCount: 1,
-        AdditionalNotes: '',
-        MetadataFetched: didFetchMetadata,
-
-        Storyline: storyline,
-        Category: category,
-        Status: status,
-        NestedGenres: nestedGenres,
-        TagList: tagList,
-      };
-
-      if (metadata && !LAZY_DOWNLOAD) {
-        if (metadata.cover?.image_id) {
-          const coverUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${metadata.cover.image_id}.jpg`;
-          const coverAbs = getCoverImageAbsolutePath(consoleName, baseName);
-          const success = await downloadImage(coverUrl, coverAbs);
-          if (success) {
-            existing.CoverImage = getCoverImageShortPath(consoleName, baseName);
-          }
-        }
-        if (metadata?.screenshots?.length) {
-          const maxScreens = metadata.screenshots.slice(0, 3);
-          for (let j = 0; j < maxScreens.length; j++) {
-            const imageId = maxScreens[j].image_id;
-            const screenshotUrl = `https://images.igdb.com/igdb/image/upload/t_screenshot_big/${imageId}.jpg`;
-            const screenshotAbs = getScreenshotAbsolutePath(consoleName, baseName, j + 1);
-            const success = await downloadImage(screenshotUrl, screenshotAbs);
-            if (success) {
-              existing.Screenshots.push(
-                getScreenshotShortPath(consoleName, baseName, j + 1)
-              );
-            }
-          }
-        }
-      } else if (metadata && LAZY_DOWNLOAD) {
-        if (metadata.cover?.image_id) {
-          existing.CoverImage = `https://images.igdb.com/igdb/image/upload/t_cover_big/${metadata.cover.image_id}.jpg`;
-        }
-        if (metadata?.screenshots?.length) {
-          const maxScreens = metadata.screenshots.slice(0, 3);
-          for (let j = 0; j < maxScreens.length; j++) {
-            const imageId = maxScreens[j].image_id;
-            const screenshotUrl = `https://images.igdb.com/igdb/image/upload/t_screenshot_big/${imageId}.jpg`;
-            existing.Screenshots.push(screenshotUrl);
-          }
-        }
-      }
-
-      finalMap[key] = existing;
-    } else {
-      // Game already exists in finalMap
-      if (!existing.RomPaths.includes(romPath)) {
-        existing.RomPaths.push(romPath);
-      }
-      existing.FileSize = (existing.FileSize || 0) + romFileSize;
-    }
-
-    processedCount++;
-    processedSinceLastSave++;
-
-    // Save periodically because crashes are fun
     if (processedSinceLastSave >= SAVE_EVERY_N) {
       await saveCurrentData(finalMap, unmatchedGames);
+      // Display current matching ratio
+      const ratio = ((matchedCount / processedCount) * 100).toFixed(2);
+      logInfo(`Current match ratio: ${matchedCount}/${processedCount} (${ratio}%)`);
       processedSinceLastSave = 0;
     }
   }
 
   // Kill the progress bar - Its job is done
   stopProgressBar(progressBar);
+
+  // Final statistics
+  const totalGames = Object.keys(finalMap).length;
+  const matchRatio = ((matchedCount / processedCount) * 100).toFixed(2);
+  logSuccess(`Processing complete!`);
+  logSuccess(`Total games processed: ${processedCount}`);
+  logSuccess(`Successfully matched: ${matchedCount}`);
+  logSuccess(`Match ratio: ${matchRatio}%`);
+  logSuccess(`Unmatched games: ${unmatchedGames.length}`);
+
   return { finalMap, unmatchedGames };
 }
 

@@ -39,9 +39,9 @@ const CLIENT_SECRET = config.IGDB?.ClientSecret || '';
 // Settings - Where user preferences go to be ignored
 const SKIP_EXISTING_METADATA = config.Settings?.SkipExistingMetadata === 'true'; // Because why redo what's already wrong
 const OFFLINE_MODE = config.Settings?.OfflineMode === 'true'; // For when the internet abandons you
-let MAX_CONCURRENCY = parseInt(config.Settings?.Concurrency ?? '4', 10); // How many promises to break simultaneously
+let MAX_CONCURRENCY = parseInt(config.Settings?.Concurrency ?? '8', 10); // How many promises to break simultaneously
 if (isNaN(MAX_CONCURRENCY) || MAX_CONCURRENCY < 1) {
-  MAX_CONCURRENCY = 4;
+  MAX_CONCURRENCY = 8;
 }
 const LAZY_DOWNLOAD = config.Settings?.LazyDownload === 'true'; // Because who has time for eager downloads
 const ADAPTIVE_RATE = config.Settings?.AdaptiveRate === 'true'; // For when you want your rate to adapt to your mood
@@ -52,7 +52,7 @@ const TAG_GENERATION = config.Settings?.TagGeneration === 'true'; // AI-powered 
 const OUTPUT_FORMAT = config.Settings?.OutputFormat?.toLowerCase() || 'json';
 
 // Optional thresholds from config - Because limits are for the weak
-const MAX_REQUESTS_PER_SECOND = parseInt(config.Settings?.MaxRequestsPerSecond || '4', 10);
+const MAX_REQUESTS_PER_SECOND = parseInt(config.Settings?.MaxRequestsPerSecond || '8', 10);
 const REFILL_INTERVAL_MS = parseInt(config.Settings?.RefillIntervalMs || '1000', 10);
 const SAVE_EVERY_N = parseInt(config.Settings?.SaveEveryN || '20', 10);
 const FUZZY_MATCH_THRESHOLD = parseFloat(config.Settings?.FuzzyMatchThreshold || '0.4');
@@ -90,7 +90,7 @@ let CONSOLE_CORE_SELECTIONS = {}; // User selections for cores
 let FOLDER_CONSOLE_MAP = {}; // Mapping of folder names to consoles
 let IGDB_CACHE = {}; // Cache for IGDB responses
 
-const MAX_BATCH_SIZE = 1; // Maximum batch size for IGDB queries
+const MAX_BATCH_SIZE = 10; // Maximum batch size for IGDB queries
 
 // Normalized platform names - Because consistency is overrated
 const NORMALIZED_PLATFORM_NAMES = {
@@ -349,6 +349,42 @@ const GAMING_CATEGORIES = {
   ])
 };
 
+// Add new matching configuration
+const MATCHING_CONFIG = {
+  // Minimum scores for different confidence levels
+  scoreTiers: {
+    perfect: 90,
+    high: 75,
+    medium: 60,
+    low: 40
+  },
+  // Weight multipliers for different match types
+  weights: {
+    exactMatch: 1.0,
+    platformMatch: 0.8,
+    yearMatch: 0.6,
+    seriesMatch: 0.5,
+    publisherMatch: 0.4,
+    regionMatch: 0.3
+  }
+};
+
+// Common name patterns for better matching
+const NAME_PATTERNS = {
+  seriesMarkers: [
+    'trilogy', 'series', 'collection', 'saga', 'chronicles',
+    'part', 'episode', 'chapter', 'book', 'volume'
+  ],
+  editionMarkers: [
+    'edition', 'special', 'limited', 'collector', 'gold',
+    'platinum', 'complete', 'deluxe', 'enhanced'
+  ],
+  versionMarkers: [
+    'version', 'ver.', 'rev.', 'revision', 'release',
+    'update', 'patch', 'fix', 'final'
+  ]
+};
+
 module.exports = {
   ROMS_PATHS,
   OUTPUT_FOLDER,
@@ -387,5 +423,7 @@ module.exports = {
   PLATFORM_VARIATIONS,
   STOP_WORDS,
   GAMING_CATEGORIES,
+  MATCHING_CONFIG,
+  NAME_PATTERNS,
   config,
 };

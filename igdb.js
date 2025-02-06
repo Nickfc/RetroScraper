@@ -50,6 +50,12 @@ async function igdbRequest(endpoint, query) {
     return IGDB_CACHE[cacheKey];
   }
 
+  // Validate and clean the query
+  const cleanQuery = query
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/;+$/, ';'); // Ensure single semicolon at end
+
   // The actual request function, where hopes and dreams go to die
   const fn = async () => {
     let retries = 0;
@@ -61,7 +67,7 @@ async function igdbRequest(endpoint, query) {
         // Attempting to communicate with the API gods
         const response = await axios.post(
           `https://api.igdb.com/v4/${endpoint}`,
-          query,
+          cleanQuery,
           {
             headers: {
               'Client-ID': CLIENT_ID,
@@ -71,9 +77,16 @@ async function igdbRequest(endpoint, query) {
             },
           }
         );
+
+        // Log successful queries for debugging
+        console.log(`Successful query for ${endpoint}:`, cleanQuery);
+
         IGDB_CACHE[cacheKey] = response.data || [];
         return IGDB_CACHE[cacheKey];
       } catch (error) {
+        console.log(`API Error for query: ${cleanQuery}`);
+        console.log(`Error details:`, error.response?.data || error.message);
+
         if (error.response) {
           // 401: When the API decides our friendship is over
           if (error.response.status === 401) {
@@ -98,6 +111,11 @@ async function igdbRequest(endpoint, query) {
           if (error.response.status === 413) {
             logError(`IGDB request error: Request payload too large. Consider reducing batch size.`);
             throw new Error(`IGDB request error: Request payload too large.`);
+          }
+          // 400: Invalid query
+          if (error.response.status === 400) {
+            logError(`Invalid query: ${cleanQuery}`);
+            return [];
           }
         }
         // If all else fails, curl up in a corner and cry

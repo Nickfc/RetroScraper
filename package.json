@@ -14,6 +14,8 @@
     "ini": "^2.0.0",
     "inquirer": "^9.2.7",
     "json2csv": "^5.0.6",
+    "lru-cache": "^11.0.2",
+    "p-queue": "^8.1.0",
     "string-similarity": "^4.0.4",
     "xml2js": "^0.4.23"
   },
