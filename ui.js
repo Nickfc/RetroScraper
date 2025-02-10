@@ -165,35 +165,39 @@ function createProgressBar(totalGames, options = {}) {
 }
 
 // Updates the progress bar with new lies about completion time
-function updateProgressBar(progressBar, processedCount, gameTitle, metadataStatus) {
+function updateProgressBar(progressBar, processedCount, totalCount, gameTitle, metadataStatus) {
   try {
     if (!progressBar) return;
 
-    // Update with new line
+    // Ensure gameTitle is a string and has a valid length
+    const safeTitle = String(gameTitle || '').substring(0, 30);
+    const percent = Math.floor((processedCount / totalCount) * 100);
+
+    // Update the progress bar
     progressBar.update(processedCount, {
-      gameTitle: (gameTitle || '').substring(0, 30),
-      metadataStatus: '', // Remove status from progress bar
+      gameTitle: safeTitle,
+      metadataStatus: '',
       isCompleted: false
     });
 
-    // Only log messages for known status types with better validation
+    // Handle status messages
     if (metadataStatus && ['success', 'warning', 'offline'].includes(metadataStatus.toLowerCase())) {
       const statusPart = metadataStatus.toLowerCase() === 'success' 
         ? chalk.green('[SUCCESS]')
         : metadataStatus.toLowerCase() === 'warning'
-        ? chalk.yellow('[WARNING]')
-        : chalk.blue('[OFFLINE]');
+          ? chalk.yellow('[WARNING]')
+          : chalk.blue('[OFFLINE]');
 
       const message = metadataStatus.toLowerCase() === 'success'
         ? `Metadata found! (${getRandomMessage('SuccessMessages')})`
         : metadataStatus.toLowerCase() === 'warning'
-        ? `No metadata found (${getRandomMessage('WarningMessages')})`
-        : `Skipped metadata check (${getRandomMessage('OfflineMessages')})`;
+          ? `No metadata found (${getRandomMessage('WarningMessages')})`
+          : `Skipped metadata check (${getRandomMessage('OfflineMessages')})`;
 
       console.log(`${statusPart} | ${chalk.white(message)}`);
     }
   } catch (error) {
-    showError('Error updating progress bar: ' + error.message); // When updating progress becomes regression
+    console.error(`Progress bar update error: ${error.message}`);
   }
 }
 

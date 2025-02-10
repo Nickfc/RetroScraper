@@ -1,4 +1,9 @@
-// Welcome to IGDB.js, where we beg a corporate API for data like peasants at a medieval feast
+/**
+ * IGDB API Integration Module
+ * 
+ * Handles all interactions with the IGDB API, including authentication,
+ * request management, rate limiting, and data caching.
+ */
 
 const axios = require('axios');
 const { logInfo, logError, logWarning, logSuccess } = require('./logger');
@@ -13,10 +18,18 @@ const {
 } = require('./constants');
 const { queueRequest, handle429 } = require('./rateLimiter');
 
-// Our precious token, as fragile as your ex's promises
+/**
+ * Authentication token for IGDB API access
+ * @type {string|null}
+ */
 let accessToken = null;
 
-// Begging Twitch for permission to exist... I mean, for an access token
+/**
+ * Retrieves an access token from Twitch for IGDB API access
+ * @async
+ * @returns {Promise<string>} The access token for API authentication
+ * @throws {Error} If token acquisition fails
+ */
 async function getIGDBAccessToken() {
   try {
     const response = await axios.post(
@@ -37,14 +50,18 @@ async function getIGDBAccessToken() {
   }
 }
 
-// The main attraction: Where we dance with IGDB's API like we're walking on hot coals
+/**
+ * Executes a request to the IGDB API with retry and rate limiting logic
+ * @async
+ * @param {string} endpoint - The IGDB API endpoint to query
+ * @param {string} query - The IGDB query string
+ * @returns {Promise<Array>} The API response data
+ */
 async function igdbRequest(endpoint, query) {
-  // Offline mode: When we pretend the internet doesn't exist, just like your social life
   if (OFFLINE_MODE) {
     return [];
   }
 
-  // Check if we've cached this request, because why suffer twice?
   const cacheKey = `${endpoint}:${query}`;
   if (IGDB_CACHE[cacheKey]) {
     return IGDB_CACHE[cacheKey];
@@ -129,14 +146,16 @@ async function igdbRequest(endpoint, query) {
   return queueRequest(fn);
 }
 
-// Initialize IGDB connection, or as I like to call it: "The First Date"
+/**
+ * Initializes the IGDB API connection and validates credentials
+ * @async
+ * @throws {Error} If credentials are missing or invalid
+ */
 async function initIGDB() {
-  // Offline mode: Perfect for when you're as antisocial as a dev during crunch time
   if (OFFLINE_MODE) {
     logInfo(`Offline mode enabled. Skipping IGDB init.`);
     return;
   }
-  // No credentials? That's like showing up to a party without pants
   if (!CLIENT_ID || !CLIENT_SECRET) {
     logError(`IGDB credentials not set in config.ini (ClientID / ClientSecret).`);
     process.exit(1);
@@ -144,15 +163,17 @@ async function initIGDB() {
   accessToken = await getIGDBAccessToken();
 }
 
-// Fetch platform IDs, because apparently counting from 1 to infinity was too mainstream
+/**
+ * Retrieves and caches platform IDs from IGDB
+ * Maps platform names to their corresponding IGDB IDs
+ * @async
+ */
 async function fetchPlatformIDs() {
-  // In offline mode, we pretend platforms don't exist, just like PC gamers pretend consoles don't exist
   if (OFFLINE_MODE) {
     logInfo('Offline mode enabled. Skipping platform IDs fetch.');
     return;
   }
   
-  // Time to harvest platform data like a farmer with OCD
   logInfo('Fetching platform IDs from IGDB...');
   try {
     let platforms = [];
@@ -173,12 +194,10 @@ async function fetchPlatformIDs() {
     }
     logSuccess(`Fetched ${platforms.length} platforms from IGDB.`);
   } catch (error) {
-    // When everything goes wrong, blame it on cosmic rays
     logError(`Failed to fetch platform IDs: ${error.message}`);
   }
 }
 
-// Export our masochistic functions for others to enjoy
 module.exports = {
   initIGDB,
   igdbRequest,

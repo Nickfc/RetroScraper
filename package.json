@@ -1,10 +1,16 @@
 {
-  "name": "RetroScraber",
+  "name": "RetroScraper",
   "version": "1.0.0",
-  "description": "A retro game metadata scraper",
+  "description": "A tool for scraping retro game metadata",
   "main": "main.js",
   "scripts": {
-    "start": "node main.js"
+    "start": "node main.js",
+    "start:offline": "node main.js --offline",
+    "start:debug": "node main.js --debug",
+    "start:validate": "node main.js --validate",
+    "clean": "node main.js --clean",
+    "test": "jest",
+    "lint": "eslint ."
   },
   "dependencies": {
     "ajv": "^6.12.6",
@@ -12,7 +18,7 @@
     "chalk": "^4.0.0",
     "cli-progress": "^3.9.1",
     "ini": "^2.0.0",
-    "inquirer": "^9.2.7",
+    "inquirer": "^8.2.4",
     "json2csv": "^5.0.6",
     "lru-cache": "^11.0.2",
     "p-queue": "^8.1.0",
@@ -20,5 +26,8 @@
     "xml2js": "^0.4.23"
   },
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "cross-env": "^7.0.3"
+  }
 }

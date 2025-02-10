@@ -1,3 +1,16 @@
+/**
+ * RetroScraper Configuration Module
+ * 
+ * Handles loading and parsing of application configuration from INI files.
+ * Provides centralized access to user-defined settings and system configurations.
+ * 
+ * Configuration handling:
+ * - INI file parsing and validation
+ * - Default value management
+ * - Configuration error detection
+ * - Path resolution and normalization
+ */
+
 // config.js
 
 const fs = require('fs');

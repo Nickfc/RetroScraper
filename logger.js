@@ -1,35 +1,66 @@
-// Because every project needs yet another logger... *sigh*
+// NEW: Refactored logger with log level filtering and consistent formatting.
 
 const chalk = require('chalk');
-const { getRandomMessage } = require('./messageLoader');
 
-// When everything goes horribly wrong, and you need someone to blame
-function logError(msg) {
-  console.error(chalk.red(`[ERROR  ] | ${msg}`));
+// Log levels
+const levels = { 
+  DEBUG: 0,
+  INFO: 1,
+  WARNING: 2,
+  ERROR: 3,
+  SUCCESS: 1
+};
+
+const currentLevel = process.env.LOG_LEVEL ? process.env.LOG_LEVEL.toUpperCase() : 'INFO';
+const levelThreshold = levels[currentLevel] !== undefined ? levels[currentLevel] : levels.INFO;
+
+function formatMessage(level, message) {
+  const timestamp = new Date().toISOString();
+  let levelStr = level;
+  switch(level) {
+    case 'DEBUG': levelStr = chalk.gray(level); break;
+    case 'INFO': levelStr = chalk.white(level); break;
+    case 'WARNING': levelStr = chalk.yellow(level); break;
+    case 'ERROR': levelStr = chalk.red(level); break;
+    case 'SUCCESS': levelStr = chalk.green(level); break;
+  }
+  return `[${timestamp}] [${levelStr}] ${message}`;
 }
 
-// For those "it's not a bug, it's a feature" moments
-function logWarning(msg) {
-  const warningPrefix = getRandomMessage('WarningMessages');
-  console.warn(chalk.yellow(`[WARNING] | ${msg} (${warningPrefix})`));
+function logDebug(message) {
+  if (levels.DEBUG >= levelThreshold) {
+    console.log(formatMessage('DEBUG', message));
+  }
 }
 
-// When you need to pretend things are actually happening
-function logInfo(msg) {
-  const progressPrefix = getRandomMessage('ProgressMessages');
-  console.log(chalk.cyan(`[INFO   ] | ${progressPrefix} - ${msg}`));
+function logInfo(message) {
+  if (levels.INFO >= levelThreshold) {
+    console.log(formatMessage('INFO', message));
+  }
 }
 
-// Celebrating those rare moments when something actually works
-function logSuccess(msg) {
-  const successPrefix = getRandomMessage('SuccessMessages');
-  console.log(chalk.green(`[SUCCESS] | ${msg} (${successPrefix})`));
+function logWarning(message) {
+  if (levels.WARNING >= levelThreshold) {
+    console.warn(formatMessage('WARNING', message));
+  }
 }
 
-// Export these wonderful tools of despair
+function logError(message) {
+  if (levels.ERROR >= levelThreshold) {
+    console.error(formatMessage('ERROR', message));
+  }
+}
+
+function logSuccess(message) {
+  if (levels.SUCCESS >= levelThreshold) {
+    console.log(formatMessage('SUCCESS', message));
+  }
+}
+
 module.exports = {
-  logError,
-  logWarning,
+  logDebug,
   logInfo,
+  logWarning,
+  logError,
   logSuccess,
 };

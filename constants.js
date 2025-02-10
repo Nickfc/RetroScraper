@@ -1,3 +1,19 @@
+/**
+ * RetroScraper Constants Module
+ * 
+ * Provides centralized configuration and constant definitions for the RetroScraper
+ * system. Manages application-wide settings, paths, mappings, and configuration
+ * values used throughout the codebase.
+ * 
+ * Configuration categories:
+ * - Path configurations and mappings
+ * - Platform and console identifiers
+ * - System settings and thresholds
+ * - File extension validations
+ * - Matching configurations
+ * - Gaming categories and metadata
+ */
+
 // Welcome to Constants Hell, where dreams come to die and configuration lives forever
 
 const path = require('path');
@@ -35,14 +51,10 @@ const CORES_FOLDER = config.Paths?.CoresFolder
 // IGDB Credentials - Your ticket to the API rate limit hell
 const CLIENT_ID = config.IGDB?.ClientID || '';
 const CLIENT_SECRET = config.IGDB?.ClientSecret || '';
+const SKIP_EXISTING_METADATA = config.Settings?.SkipExisting === 'true';
+const OFFLINE_MODE = config.Settings?.OfflineMode === 'true';
+const MAX_CONCURRENCY = parseInt(config.Settings?.MaxConcurrency || '8', 10);
 
-// Settings - Where user preferences go to be ignored
-const SKIP_EXISTING_METADATA = config.Settings?.SkipExistingMetadata === 'true'; // Because why redo what's already wrong
-const OFFLINE_MODE = config.Settings?.OfflineMode === 'true'; // For when the internet abandons you
-let MAX_CONCURRENCY = parseInt(config.Settings?.Concurrency ?? '8', 10); // How many promises to break simultaneously
-if (isNaN(MAX_CONCURRENCY) || MAX_CONCURRENCY < 1) {
-  MAX_CONCURRENCY = 8;
-}
 const LAZY_DOWNLOAD = config.Settings?.LazyDownload === 'true'; // Because who has time for eager downloads
 const ADAPTIVE_RATE = config.Settings?.AdaptiveRate === 'true'; // For when you want your rate to adapt to your mood
 const VALIDATE_SCHEMA = config.Settings?.ValidateSchema === 'true'; // For the schema purists

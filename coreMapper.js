@@ -1,7 +1,16 @@
-/*
- * Welcome to the Core Matchmaking Service™
- * Where we force romantic relationships between consoles and cores
- * Whether they like it or not... till crash do them part
+/**
+ * RetroScraper Core Mapping Module
+ * 
+ * Manages relationships between emulator cores and gaming platforms through
+ * sophisticated mapping and configuration mechanisms. Provides core discovery,
+ * compatibility mapping, and user preference management.
+ * 
+ * Core features:
+ * - Automatic core discovery and analysis
+ * - Platform compatibility mapping
+ * - Core preference management
+ * - Core info file parsing
+ * - Conflict resolution with user input
  */
 
 const fs = require('fs');
@@ -93,20 +102,23 @@ async function fetchAvailableCores() {
         } else {
           logWarning(`Missing .info file for core "${coreName}".`);
         }
-        const systemsFieldNames = ['supported_extensions', 'systems', 'systemname', 'supported_platforms'];
+
         let systems = [];
-        for (const fieldName of systemsFieldNames) {
-          if (coreInfo[fieldName]) {
-            systems = coreInfo[fieldName].split(',').map((s) => s.trim().toLowerCase());
-            break;
+        // Extract supported systems from core info
+        const systemsFieldNames = ['supported_extensions', 'systems', 'systemname', 'supported_platforms'];
+        for (const field of systemsFieldNames) {
+          if (coreInfo[field]) {
+            systems = systems.concat(coreInfo[field].toLowerCase().split(',').map(s => s.trim()));
           }
         }
-        if (!systems.length && coreInfo['display_name']) {
+
+        if (systems.length === 0 && coreInfo['display_name']) {
           systems = [coreInfo['display_name'].toLowerCase()];
         }
         if (!systems.length) {
           systems = [coreName.toLowerCase()];
         }
+
         for (const system of systems) {
           if (!CORE_CONSOLE_MAP[system]) {
             CORE_CONSOLE_MAP[system] = [];

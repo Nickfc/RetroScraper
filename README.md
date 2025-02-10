@@ -287,6 +287,15 @@ Any ROM that IGDB can’t identify (or that fails fuzzy matching) lands in the `
 node buildGamesJson.js --debug
 ```
 
+### TUI Module Warning
+
+If you encounter a log warning indicating that your application couldn't load the TUI module and is reverting to the standard CLI mode, it usually means the required packages (like blessed or blessed-contrib) aren't installed. To fix it, make sure you install the necessary dependencies:
+
+```bash
+# Run this in your project root:
+npm install blessed blessed-contrib
+```
+
 ## 🤝 Contributing
 
 PRs are welcome. If you have new ideas—like summoning more metadata from IGDB or generating even wackier tags—go for it. Just keep the code at least half as sarcastic, so we maintain brand consistency.

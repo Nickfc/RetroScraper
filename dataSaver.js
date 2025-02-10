@@ -1,3 +1,18 @@
+/**
+ * RetroScraper Data Persistence Module
+ * 
+ * Manages the persistence and validation of scraped game data in multiple formats.
+ * Implements support for JSON schema validation, CSV export, and XML conversion
+ * while maintaining proper file organization and data integrity.
+ * 
+ * Supported features:
+ * - Multi-format data export (JSON, XML, CSV)
+ * - Schema validation for data integrity
+ * - Structured file organization by console
+ * - Index generation for quick lookups
+ * - Core mapping persistence
+ */
+
 // Welcome to dataSaver.js - Where your ROMs go to get properly documented before their inevitable demise
 
 // Summoning the elder gods of Node.js
@@ -105,12 +120,12 @@ function validateJsonSchema(games) {
         },
       },
     },
-    required: ['Games'], // The 'Games' array is required at the root level
   };
 
-  const ajv = new Ajv({ allErrors: true }); // Judge, jury, and executioner of your JSON
+  const ajv = new Ajv();
   const validate = ajv.compile(schema);
   const valid = validate({ Games: games });
+
   if (!valid) {
     logWarning(`Your data is as organized as a tornado in a trailer park: ${JSON.stringify(validate.errors, null, 2)}`);
   } else {
