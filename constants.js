@@ -102,7 +102,7 @@ let CONSOLE_CORE_SELECTIONS = {}; // User selections for cores
 let FOLDER_CONSOLE_MAP = {}; // Mapping of folder names to consoles
 let IGDB_CACHE = {}; // Cache for IGDB responses
 
-const MAX_BATCH_SIZE = 10; // Maximum batch size for IGDB queries
+const MAX_BATCH_SIZE = 50; // Maximum batch size for IGDB queries
 
 // Normalized platform names - Because consistency is overrated
 const NORMALIZED_PLATFORM_NAMES = {

@@ -19,6 +19,7 @@
     "cli-progress": "^3.9.1",
     "ini": "^2.0.0",
     "inquirer": "^8.2.4",
+    "ioredis": "^5.5.0",
     "json2csv": "^5.0.6",
     "lru-cache": "^11.0.2",
     "p-queue": "^8.1.0",

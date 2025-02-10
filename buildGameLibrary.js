@@ -99,22 +99,22 @@ async function loadExistingGames() {
  * Processes a single game entry
  * @async
  * @param {Object} game - Game entry to process
- * @param {string} console - Console identifier
+ * @param {string} consoleName - Console identifier
  * @param {Object} progressBar - Progress bar instance
  * @param {number} processedCount - Number of games processed
  * @returns {Promise<Object>} Processing result
  */
-async function processGame(game, console, progressBar, processedCount) {
+async function processGame(game, consoleName, progressBar, processedCount) {
   try {
-    // Fetch metadata from IGDB API
-    const metadata = await fetchGameMetadata(game.name, console);
+    // Fetch metadata from IGDB API using consoleName
+    const metadata = await fetchGameMetadata(game.name, consoleName);
     
-    // Handle metadata results
     if (metadata) {
       progressBar.updateProgressBar(processedCount, game.name, 'success');
       
-      // Process platform specific info
-      const platformId = getPlatformId(console) || 0;
+      // Use default value 0 when platformId is falsy
+      const platformId = getPlatformId(consoleName) || 0;
+      
       let releaseDateStr = '';
       let releaseYear = '';
       
@@ -124,13 +124,11 @@ async function processGame(game, console, progressBar, processedCount) {
         releaseYear = dt.getFullYear().toString();
       }
 
-      // Process game metadata
       const storyline = metadata.storyline || '';
       const category = metadata.category !== undefined ? String(metadata.category) : '';
       const status = metadata.status !== undefined ? String(metadata.status) : '';
       const nestedGenres = processNestedGenres(metadata.genres);
       
-      // Generate additional metadata
       const tagList = generateTags({
         summary: metadata.summary,
         storyline,
@@ -156,7 +154,6 @@ async function processGame(game, console, progressBar, processedCount) {
       return { success: false };
     }
   } catch (error) {
-    // Even our error handling has depression
     logError(`Failed to process game ${game.name}: ${error.message}`);
     progressBar.updateProgressBar(processedCount, game.name, 'error');
     return { 
@@ -177,18 +174,20 @@ async function processGame(game, console, progressBar, processedCount) {
  * @returns {Promise<Object>} Batch processing results
  */
 async function processBatch(games, finalMap, unmatchedGames, progressBar, processedCount) {
-    try {
-        const batch = games.filter(game => {
-            if (!game || !game.consoleName || !game.title) return false;
-            const key = game.consoleName.toLowerCase().trim() + ':' + game.title.toLowerCase().trim();
-            return !finalMap[key];
-        });
+    // Process batches in parallel with controlled concurrency
+    const batchSize = 20; // Increased from original
+    const batches = [];
+    
+    for (let i = 0; i < games.length; i += batchSize) {
+        batches.push(games.slice(i, i + batchSize));
+    }
 
-        if (batch.length === 0) return { processed: 0, matched: 0 };
-
+    // Process batches concurrently with Promise.all
+    await Promise.all(batches.map(async (batch) => {
         const metadataResults = await fetchGameMetadataBatch(batch);
-        let batchMatchCount = 0;
-
+        // Process image downloads concurrently
+        const imagePromises = [];
+        
         await Promise.all(batch.map(async (gameEntry, i) => {
             try {
                 statsCollector.addProcessed();
@@ -203,20 +202,38 @@ async function processBatch(games, finalMap, unmatchedGames, progressBar, proces
                         console: gameEntry.consoleName || 'Unknown',
                         romPath: gameEntry.romPath || '',
                         folderPath: gameEntry.romPath ? path.dirname(gameEntry.romPath) : '',
-                        reason: 'No metadata found'
+                        reason: 'No metadata found',
+                        matchAttempts: {
+                            exactMatch: false,
+                            platformMatch: false,
+                            yearMatch: false,
+                            seriesMatch: false,
+                            publisherMatch: false,
+                            regionMatch: false
+                        }
                     });
                     return;
                 }
 
-                // Rest of the processing...
-                // Asynchronously fetch file size
-                let fileSize = 0;
-                try {
-                    const stats = await fs.promises.stat(gameEntry.romPath);
-                    fileSize = stats.size;
-                } catch (err) {
-                    logWarning(`Failed to get file size for ${gameEntry.romPath}: ${err.message}`);
+                // Compute key, platformId, and release dates robustly
+                const key = gameEntry.consoleName.toLowerCase().trim() + ':' + gameEntry.title.toLowerCase().trim();
+                const platformId = getPlatformId(gameEntry.consoleName) || 0;
+                let releaseDateStr = '';
+                let releaseYear = '';
+                if (metadata.first_release_date) {
+                    const dt = new Date(metadata.first_release_date * 1000);
+                    releaseDateStr = dt.toISOString().split('T')[0];
+                    releaseYear = dt.getFullYear().toString();
                 }
+
+                // Asynchronously fetch file size
+                const fileSizePromise = fs.promises.stat(gameEntry.romPath)
+                    .then(stats => stats.size)
+                    .catch(err => {
+                        logWarning(`Failed to get file size for ${gameEntry.romPath}: ${err.message}`);
+                        return 0;
+                    });
+                const fileSize = await fileSizePromise;
 
                 const storyline = metadata.storyline || '';
                 const category = metadata.category !== undefined ? String(metadata.category) : '';
@@ -279,29 +296,9 @@ async function processBatch(games, finalMap, unmatchedGames, progressBar, proces
                     TagList: tagList,
                 };
 
-                // Download images if available
-                if (!LAZY_DOWNLOAD) {
-                    if (metadata.cover?.image_id) {
-                        const coverUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${metadata.cover.image_id}.jpg`;
-                        const coverAbs = getCoverImageAbsolutePath(gameEntry.consoleName, gameEntry.title);
-                        const success = await downloadImage(coverUrl, coverAbs);
-                        if (success) {
-                            gameData.CoverImage = getCoverImageShortPath(gameEntry.consoleName, gameEntry.title);
-                        }
-                    }
-
-                    if (metadata.screenshots?.length) {
-                        const maxScreens = metadata.screenshots.slice(0, 3);
-                        for (let j = 0; j < maxScreens.length; j++) {
-                            const imageId = maxScreens[j].image_id;
-                            const screenshotUrl = `https://images.igdb.com/igdb/image/upload/t_screenshot_big/${imageId}.jpg`;
-                            const screenshotAbs = getScreenshotAbsolutePath(gameEntry.consoleName, gameEntry.title, j + 1);
-                            const success = await downloadImage(screenshotUrl, screenshotAbs);
-                            if (success) {
-                                gameData.Screenshots.push(getScreenshotShortPath(gameEntry.consoleName, gameEntry.title, j + 1));
-                            }
-                        }
-                    }
+                // Optimize image downloads with concurrent processing
+                if (!LAZY_DOWNLOAD && metadata.cover?.image_id) {
+                    imagePromises.push(downloadImagesForGame(gameEntry, metadata, gameData));
                 }
 
                 finalMap[key] = gameData;
@@ -320,14 +317,39 @@ async function processBatch(games, finalMap, unmatchedGames, progressBar, proces
             }
         }));
 
-        return {
-            processed: batch.length,
-            matched: batchMatchCount
-        };
-    } catch (error) {
-        logError(`Batch processing error: ${error.message}`);
-        return { processed: 0, matched: 0 };
+        // Wait for all image downloads to complete
+        if (imagePromises.length > 0) {
+            await Promise.all(imagePromises);
+        }
+    }));
+
+    return {
+        processed: games.length,
+        matched: games.length - unmatchedGames.length
+    };
+}
+
+// New: Parallel image download handler
+async function downloadImagesForGame(gameEntry, metadata, gameData) {
+    const downloadPromises = [];
+
+    if (metadata.cover?.image_id) {
+        const coverUrl = `https://images.igdb.com/igdb/image/upload/t_cover_big/${metadata.cover.image_id}.jpg`;
+        const coverAbs = getCoverImageAbsolutePath(gameEntry.consoleName, gameEntry.title);
+        downloadPromises.push(downloadImage(coverUrl, coverAbs));
     }
+
+    if (metadata.screenshots?.length) {
+        const maxScreens = metadata.screenshots.slice(0, 3);
+        downloadPromises.push(...maxScreens.map((screenshot, j) => {
+            const imageId = screenshot.image_id;
+            const screenshotUrl = `https://images.igdb.com/igdb/image/upload/t_screenshot_big/${imageId}.jpg`;
+            const screenshotAbs = getScreenshotAbsolutePath(gameEntry.consoleName, gameEntry.title, j + 1);
+            return downloadImage(screenshotUrl, screenshotAbs);
+        }));
+    }
+
+    return Promise.all(downloadPromises);
 }
 
 /**
@@ -365,28 +387,22 @@ async function buildGameLibrary() {
   for (let i = 0; i < newGameEntries.length; i += MAX_BATCH_SIZE) {
     batches.push(newGameEntries.slice(i, i + MAX_BATCH_SIZE));
   }
-
+  
+  // Process batches sequentially with partial saving using SAVE_EVERY_N
   for (const batch of batches) {
-    const batchResults = await processBatch(batch, finalMap, unmatchedGames, progressBar, processedCount);
-    processedCount += batchResults.processed;
-    processedSinceLastSave += batchResults.processed;
-    matchedCount += batchResults.matched;
+    const result = await processBatch(batch, finalMap, unmatchedGames, progressBar, processedCount);
+    processedCount += result.processed;
+    processedSinceLastSave += result.processed;
+    matchedCount += result.matched;
     
-    // Update progress bar and any UI stuff as needed
-    updateProgressBar(progressBar, processedCount, newGameEntries.length);
-    
-    // Partial save if threshold reached
     if (processedSinceLastSave >= SAVE_EVERY_N) {
-        await saveCurrentData(finalMap, unmatchedGames);
-        processedSinceLastSave = 0; // Reset the counter after save
-        logInfo(`Partial save performed at ${processedCount} processed entries.`);
+      await saveCurrentData(finalMap, unmatchedGames);
+      processedSinceLastSave = 0;
     }
   }
-
-  // Final save if unsaved progress remains
-  if (processedSinceLastSave > 0) {
-    await saveCurrentData(finalMap, unmatchedGames);
-  }
+  
+  // Final save after all batches complete
+  await saveCurrentData(finalMap, unmatchedGames);
 
   // Kill the progress bar - Its job is done
   stopProgressBar(progressBar);

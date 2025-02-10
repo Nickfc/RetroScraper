@@ -203,38 +203,62 @@ function enhancedFuzzyMatch(baseTitle, candidates) {
 
 // Add new helper functions for advanced matching
 function preprocessGameName(title) {
+  // Handle null, undefined, or non-string inputs
+  if (!title || typeof title !== 'string') {
+    logWarning(`Invalid title provided to preprocessGameName: ${title}`);
+    return {
+      clean: '',
+      extracted: {
+        regions: [],
+        versions: [],
+        modifiers: [],
+        fixes: [],
+        translations: [],
+        dumps: [],
+        media: [],
+        separators: [],
+        suffixes: []
+      },
+      original: String(title || '')
+    };
+  }
+
+  // Clean and normalize the input string
+  let clean = String(title).trim();
+  
   const patterns = {
-    // Regional variations
     regions: /\b(EU|USA|EUR|JPN|JAP|NTSC|PAL|World|UE|JP|U|J|E|A)\b/gi,
-    // Version markers
     versions: /\b(v[\d\.]+|ver[\d\.]+|rev[\d\.]+)\b/gi,
-    // Release modifiers
     modifiers: /\b(beta|alpha|proto|sample|demo|final|retail|promo)\b/gi,
-    // Common fixes
     fixes: /\b(fix\d*|fixed|patch\d*|patched)\b/gi,
-    // Translation markers
     translations: /\b((\w{2})\s*trans|translation|translated\s*\(?(\w{2})\)?)/gi,
-    // Dump info
     dumps: /\[(.*?)\]|\((.*?)\)/g,
-    // Disk/Tape markers
     media: /\b(disk|disc|tape|side)\s*[ABCD\d]\b/gi,
-    // Common title separators
     separators: /[-_:;\/\\]/g,
-    // Common suffixes
     suffixes: /\b(remastered|remake|rerelease|classic|collection)\b/gi
   };
 
-  let clean = title;
-  // Remove each pattern type and store matches
-  const extracted = {};
-  for (const [key, pattern] of Object.entries(patterns)) {
-    const matches = clean.match(pattern) || [];
-    extracted[key] = matches.map(m => m.toLowerCase());
-    clean = clean.replace(pattern, ' ');
-  }
+  // Initialize extracted patterns object with empty arrays
+  const extracted = Object.keys(patterns).reduce((acc, key) => {
+    acc[key] = [];
+    return acc;
+  }, {});
 
-  // Clean up whitespace
-  clean = clean.replace(/\s+/g, ' ').trim();
+  try {
+    // Process each pattern
+    for (const [key, pattern] of Object.entries(patterns)) {
+      const matches = clean.match(pattern) || [];
+      extracted[key] = matches.map(m => m.toLowerCase());
+      clean = clean.replace(pattern, ' ');
+    }
+
+    // Clean up whitespace
+    clean = clean.replace(/\s+/g, ' ').trim();
+
+  } catch (error) {
+    logError(`Error preprocessing game name "${title}":`, error);
+    clean = String(title).trim();
+  }
 
   return {
     clean,
@@ -394,41 +418,118 @@ function pickBestFuzzyMatch(baseGameTitle, igdbResults) {
 }
 
 // The main event: where hope goes to die and metadata comes to live
-async function fetchGameMetadata(gameEntry) {
-  if (OFFLINE_MODE) return null;
+const metadataCache = require('./metadataCache');
+const { addToQueue } = require('./apiQueue');
+const { logInfo, logError, logDebug } = require('./logger');
 
-  const title = gameEntry.title;
-  const consoleName = gameEntry.consoleName;
-  const platformId = getPlatformId(consoleName);
-  
-  // Use our advanced search instead of the old batch search
-  const results = await advancedSearch(title, platformId);
-  
-  // Log search details for debugging
-  console.log(`\nSearch details for "${title}":`);
-  console.log(`Generated variations:`, generateSearchStrategies(title));
-  console.log(`Platform ID:`, platformId);
-  
-  if (results.length > 0) {
-    // Return the highest scored result
-    return results[0];
-  }
+// Add cache import
+const cache = require('./cache');
 
-  return null;
+async function fetchGameMetadata(gameName, console) {
+    // Generate a unique cache key
+    const cacheKey = `${console}:${gameName}`;
+    
+    // Check cache first
+    const cached = metadataCache.get(cacheKey);
+    if (cached) {
+        logDebug(`Cache hit for ${gameName}`);
+        return cached;
+    }
+
+    logDebug(`Cache miss for ${gameName}, queuing API request`);
+
+    // Queue the API request if not in cache
+    try {
+        const metadata = await addToQueue(async () => {
+            // Use default value 0 when platformId is falsy
+            const platformId = getPlatformId(console) || 0;
+            const results = await advancedSearch(gameName, platformId);
+            return results.length > 0 ? results[0] : null;
+        });
+
+        // Cache successful results
+        if (metadata) {
+            logDebug(`Caching result for ${gameName}`);
+            metadataCache.set(cacheKey, metadata);
+        }
+
+        return metadata;
+    } catch (error) {
+        logError(`Failed to fetch metadata for ${gameName}: ${error.message}`);
+        return null;
+    }
 }
 
-// New function for batch processing
-async function fetchGameMetadataBatch(gameEntries) {
-  if (OFFLINE_MODE) return new Array(gameEntries.length).fill(null);
+async function fetchGameMetadataBatch(games) {
+    if (!Array.isArray(games)) {
+        logError('Invalid input: games must be an array');
+        return [];
+    }
 
-  const results = await Promise.all(
-    gameEntries.map(async (entry) => {
-      const searchResults = await advancedSearch(entry.title, getPlatformId(entry.consoleName));
-      return searchResults.length > 0 ? searchResults[0] : null;
-    })
-  );
+    // Generate cache keys
+    const cacheKeys = games.map(game => 
+        `metadata:${game.consoleName || 'unknown'}:${game.title || ''}`
+    );
 
-  return results;
+    // Try to get from cache first
+    const cachedResults = await cache.mget(cacheKeys);
+    const missingIndexes = [];
+    const results = new Array(games.length).fill(null);
+
+    // Identify missing entries
+    cachedResults.forEach((result, index) => {
+        if (result) {
+            results[index] = result;
+        } else {
+            missingIndexes.push(index);
+        }
+    });
+
+    if (missingIndexes.length > 0) {
+        // Process missing entries in smaller batches
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < missingIndexes.length; i += BATCH_SIZE) {
+            const batchIndexes = missingIndexes.slice(i, i + BATCH_SIZE);
+            const batchGames = batchIndexes.map(idx => games[idx]);
+
+            // Process each game in the batch individually
+            const batchPromises = batchGames.map(async (game) => {
+                if (!game || !game.title) {
+                    logWarning(`Invalid game object: ${JSON.stringify(game)}`);
+                    return null;
+                }
+
+                try {
+                    const platformId = getPlatformId(game.consoleName) || 0;
+                    // Search for a single game at a time
+                    const results = await advancedSearch(game.title, platformId);
+                    return results.length > 0 ? results[0] : null;
+                } catch (error) {
+                    logError(`Error fetching metadata for ${game.title}: ${error.message}`);
+                    return null;
+                }
+            });
+
+            // Wait for batch to complete
+            const batchResults = await Promise.all(batchPromises);
+
+            // Update results and cache
+            batchIndexes.forEach((originalIndex, batchIdx) => {
+                const result = batchResults[batchIdx];
+                results[originalIndex] = result;
+                if (result) {
+                    cache.set(cacheKeys[originalIndex], result);
+                }
+            });
+
+            // Add a small delay between batches to avoid rate limiting
+            if (i + BATCH_SIZE < missingIndexes.length) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+    }
+
+    return results;
 }
 
 // Add these new helper functions
@@ -447,7 +548,7 @@ function getEditDistance(str1, str2) {
   const dp = Array(m + 1).fill().map(() => Array(n + 1).fill(0));
 
   for (let i = 0; i <= m; i++) {
-    for (let j = 0; j <= n; j++) {
+    for (let j = 0; j <= n; j++) { // Fixed: condition changed to "j <= n"
       if (i === 0) dp[i][j] = j;
       else if (j === 0) dp[i][j] = i;
       else if (str1[i - 1] === str2[j - 1]) dp[i][j] = dp[i - 1][j - 1];
@@ -501,7 +602,7 @@ async function advancedSearch(title, platformId) {
 
   // Strategy 1: Direct search using 'search' endpoint first
   const searchQuery = `
-    search "${strategies[0].replace(/"/g, '\\"')}";
+    search "${strategies[0].replace(/"/g, '\\"')}"; 
     fields name, alternative_names.name, cover.*, genres.name, first_release_date,
            summary, storyline, platforms, involved_companies.company.name,
            involved_companies.publisher, involved_companies.developer,
@@ -590,4 +691,15 @@ async function advancedSearch(title, platformId) {
 module.exports = {
   fetchGameMetadata,
   fetchGameMetadataBatch, // Export new function
+  generateSearchStrategies,
+  advancedSearch,
+  preprocessGameName,
+  generateSearchQueries,
+  scoreMatch,
+  enhancedFuzzyMatch,
+  normalizeGameTitle,
+  tokenizeTitle,
+  getAlternativeTitles,
+  cleanTitleForSearch,
+  generateSearchVariations
 };
